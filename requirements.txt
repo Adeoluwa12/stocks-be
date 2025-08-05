@@ -7,15 +7,15 @@ gunicorn
 Werkzeug==2.3.7
 
 # Data handling & analysis
-pandas==2.1.1
-numpy==1.24.3
 pandas_ta
 scipy
 scikit-learn
 
 # HTTP & APIs
 requests==2.31.0
-python-dotenv==1.0.0
+pandas==2.1.1
+numpy==1.26.4
+python-dotenv==1.0.1
 yfinance==0.2.18
 anthropic
 
