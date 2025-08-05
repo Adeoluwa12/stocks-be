@@ -4307,7 +4307,7 @@
 
 
 """
-Enhanced Multi-Asset Stock Analysis API v8.5
+Enhanced Multi-Asset Stock Analysis API v8.5 - Fixed Version
 - yfinance for US stocks and crypto (primary)
 - TradingView Scraper for Nigerian stocks (primary)
 - Multiple fallback data sources
@@ -4341,7 +4341,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file (if present)
 load_dotenv()
 
-# Set up UTF-8 compatible logging
+# Set up UTF-8 compatible logging (console only for Render)
 class UTF8StreamHandler(logging.StreamHandler):
     def __init__(self, stream=None):
         if stream is None:
@@ -4355,8 +4355,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('stock_analysis.log', encoding='utf-8'),
-        UTF8StreamHandler()
+        UTF8StreamHandler()  # Only console logging for Render
     ]
 )
 logger = logging.getLogger(__name__)
@@ -4364,6 +4363,9 @@ logger = logging.getLogger(__name__)
 # Flask app setup
 app = Flask(__name__)
 CORS(app)
+
+# Get port from environment variable (Render sets this automatically)
+PORT = int(os.environ.get('PORT', 5000))
 
 # =============================================================================
 # API CONFIGURATIONS - SECURE WITH ENVIRONMENT VARIABLES
@@ -4381,8 +4383,8 @@ ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query"
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
 GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# CryptoCompare API
-CRYPTCOMPARE_API_KEY = os.getenv('CRYPTCOMPARE_API_KEY', '')
+# CryptoCompare API - FIXED: Check both possible env var names
+CRYPTO_COMPARE_API_KEY = os.getenv('CRYPTO_COMPARE_API_KEY') or os.getenv('CRYPTCOMPARE_API_KEY', '')
 CRYPTO_COMPARE_BASE_URL = "https://min-api.cryptocompare.com/data"
 
 # Log API key status (without exposing keys)
@@ -4390,7 +4392,7 @@ logger.info(f"API Keys Status:")
 logger.info(f"- Twelve Data: {'Configured' if TWELVE_DATA_API_KEY and TWELVE_DATA_API_KEY != 'demo' else 'Using demo'}")
 logger.info(f"- Alpha Vantage: {'Configured' if ALPHA_VANTAGE_API_KEY and ALPHA_VANTAGE_API_KEY != 'demo' else 'Using demo'}")
 logger.info(f"- Groq AI: {'Configured' if GROQ_API_KEY else 'Not configured'}")
-logger.info(f"- CryptoCompare: {'Configured' if CRYPTCOMPARE_API_KEY else 'Not configured'}")
+logger.info(f"- CryptoCompare: {'Configured' if CRYPTO_COMPARE_API_KEY else 'Not configured'}")
 
 # =============================================================================
 # DATABASE SETUP
@@ -4571,12 +4573,21 @@ def fetch_us_stock_data(symbol, interval="1d", period="1y"):
         yf_interval = yf_interval_map.get(interval, '1d')
         yf_period = yf_period_map.get(period, '1y')
         
-        # Fetch data with multiple attempts
-        max_attempts = 3
+        # FIXED: Reduced attempts and timeout to avoid rate limiting
+        max_attempts = 2
         for attempt in range(max_attempts):
             try:
                 logger.info(f"Attempt {attempt + 1}/{max_attempts} for {symbol}")
-                data = ticker.history(period=yf_period, interval=yf_interval, timeout=30)
+                
+                # FIXED: Reduced timeout and added more parameters
+                data = ticker.history(
+                    period=yf_period, 
+                    interval=yf_interval, 
+                    timeout=15,  # Reduced from 30
+                    prepost=False,  # Exclude pre/post market
+                    auto_adjust=True,  # Auto-adjust for splits/dividends
+                    back_adjust=False
+                )
                 
                 if not data.empty and len(data) > 0:
                     # Standardize column names
@@ -4595,12 +4606,12 @@ def fetch_us_stock_data(symbol, interval="1d", period="1y"):
                     logger.warning(f"Empty data from yfinance for {symbol} (attempt {attempt + 1})")
                 
                 if attempt < max_attempts - 1:
-                    time.sleep(2)  # Wait before retry
+                    time.sleep(3)  # Increased wait time between retries
                     
             except Exception as e:
                 logger.error(f"yfinance attempt {attempt + 1} error for {symbol}: {str(e)}")
                 if attempt < max_attempts - 1:
-                    time.sleep(2)  # Wait before retry
+                    time.sleep(3)  # Increased wait time between retries
                 else:
                     raise e
             
@@ -4683,12 +4694,18 @@ def fetch_crypto_data(symbol, interval="1d", period="1y"):
         yf_interval = yf_interval_map.get(interval, '1d')
         yf_period = yf_period_map.get(period, '1y')
         
-        # Fetch data with multiple attempts
-        max_attempts = 3
+        # FIXED: Reduced attempts and timeout for crypto
+        max_attempts = 2
         for attempt in range(max_attempts):
             try:
                 logger.info(f"Crypto attempt {attempt + 1}/{max_attempts} for {symbol}")
-                data = ticker.history(period=yf_period, interval=yf_interval, timeout=30)
+                data = ticker.history(
+                    period=yf_period, 
+                    interval=yf_interval, 
+                    timeout=15,  # Reduced timeout
+                    prepost=False,
+                    auto_adjust=True
+                )
                 
                 if not data.empty and len(data) > 0:
                     data.columns = data.columns.str.lower()
@@ -4706,12 +4723,12 @@ def fetch_crypto_data(symbol, interval="1d", period="1y"):
                     logger.warning(f"Empty crypto data from yfinance for {symbol} (attempt {attempt + 1})")
                 
                 if attempt < max_attempts - 1:
-                    time.sleep(2)  # Wait before retry
+                    time.sleep(3)  # Increased wait time
                     
             except Exception as e:
                 logger.error(f"yfinance crypto attempt {attempt + 1} error for {symbol}: {str(e)}")
                 if attempt < max_attempts - 1:
-                    time.sleep(2)  # Wait before retry
+                    time.sleep(3)
                 else:
                     raise e
             
@@ -4732,7 +4749,7 @@ def fetch_crypto_data(symbol, interval="1d", period="1y"):
         logger.info(f"Trying CryptoCompare fallback for crypto {symbol}")
         data = fetch_crypto_compare_data(symbol, interval, 100)
         if not data.empty:
-            return data, "cryptcompare"
+            return data, "cryptocompare"
     except Exception as e:
         logger.error(f"CryptoCompare fallback failed for crypto {symbol}: {str(e)}")
     
@@ -5910,7 +5927,7 @@ def analyze_all_stocks_enhanced():
             'yfinance_count': 0,
             'tradingview_scraper_count': 0,
             'twelve_data_count': 0,
-            'cryptcompare_count': 0,
+            'cryptocompare_count': 0,
             'alpha_vantage_count': 0,
             'investpy_count': 0,
             'stockdata_org_count': 0,
@@ -5918,13 +5935,14 @@ def analyze_all_stocks_enhanced():
             'realistic_nse_data_count': 0
         }
         
+        # FIXED: Reduced max_workers to avoid overwhelming APIs
         # Process each market group
         for stocks, market_type in stock_groups:
             logger.info(f"Processing {len(stocks)} {market_type} stocks")
             update_progress(current_count, 120, f"Processing {market_type} stocks", f"Analyzing {market_type} market", start_time)
             
             # Use ThreadPoolExecutor for parallel processing
-            with ThreadPoolExecutor(max_workers=5) as executor:
+            with ThreadPoolExecutor(max_workers=3) as executor:  # Reduced from 5 to 3
                 # Submit all tasks
                 future_to_symbol = {}
                 for symbol in stocks:
@@ -5937,7 +5955,7 @@ def analyze_all_stocks_enhanced():
                     current_count += 1
                     
                     try:
-                        result = future.result(timeout=60)  # 60 second timeout per stock
+                        result = future.result(timeout=90)  # Increased timeout to 90 seconds
                         all_results.update(result)
                         
                         # Count data sources
@@ -5949,8 +5967,8 @@ def analyze_all_stocks_enhanced():
                                 data_source_counts['tradingview_scraper_count'] += 1
                             elif 'twelve_data' in data_source:
                                 data_source_counts['twelve_data_count'] += 1
-                            elif 'cryptcompare' in data_source:
-                                data_source_counts['cryptcompare_count'] += 1
+                            elif 'cryptocompare' in data_source:
+                                data_source_counts['cryptocompare_count'] += 1
                             elif 'alpha_vantage' in data_source:
                                 data_source_counts['alpha_vantage_count'] += 1
                             elif 'realistic_nse_data' in data_source:
@@ -6012,7 +6030,7 @@ def analyze_all_stocks_enhanced():
                 'primary_data_source': 'yfinance for US/Crypto, TradingView Scraper for Nigerian stocks',
                 'ai_provider': 'Groq (Llama3-8B)',
                 'expanded_coverage': '120 total assets with multiple Nigerian data sources',
-                'data_source_strategy': 'US/Crypto: yfinance → TwelveData, Nigerian: Multiple sources',
+                'data_source_strategy': 'US/Crypto: yfinance → TwelveData, Nigerian: Multiple sources → Synthetic',
                 'yfinance_integration': 'Available',
                 'tradingview_scraper_integration': 'Available',
                 'error_handling': 'Improved - continues processing even if individual stocks fail'
@@ -6273,11 +6291,12 @@ def get_symbols():
 # =============================================================================
 
 if __name__ == '__main__':
-    logger.info("Starting Enhanced Multi-Asset Stock Analysis API v8.5")
+    logger.info("Starting Enhanced Multi-Asset Stock Analysis API v8.5 - Fixed Version")
     logger.info(f"Total assets: {len(ALL_SYMBOLS)} (US: {len(US_STOCKS)}, Nigerian: {len(NIGERIAN_STOCKS)}, Crypto: {len(CRYPTO_STOCKS)})")
     logger.info(f"AI Analysis: {'Enabled' if GROQ_API_KEY else 'Disabled (API key required)'}")
     logger.info("Data Sources: yfinance (primary), TradingView Scraper, TwelveData, CryptoCompare, Alpha Vantage")
     logger.info("Features: Hierarchical analysis, Timeframe resampling, Smart fallbacks")
+    logger.info(f"Running on port: {PORT}")
     
     # Run the Flask app
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=PORT, debug=False, threaded=True)
