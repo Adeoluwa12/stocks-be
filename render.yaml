@@ -2,13 +2,15 @@ services:
   - type: web
     name: stock-analysis-api
     env: python
+    region: oregon
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
     envVars:
       - key: PORT
         value: 5000
       - key: PYTHON_VERSION
-        value: 3.9.18
+        value: 3.11.9
       - key: TWELVE_DATA_API_KEY
         sync: false
       - key: ALPHA_VANTAGE_API_KEY
