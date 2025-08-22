@@ -8360,7 +8360,44 @@ logger = logging.getLogger(__name__)
 
 # Flask app setup
 app = Flask(__name__)
-CORS(app)
+# Enhanced CORS configuration
+CORS(app,
+     origins=["https://my-stocks-s2at.onrender.com", "http://localhost:3000", "http://localhost:5177"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"],
+     supports_credentials=False,
+     max_age=86400)
+
+# Additional CORS headers
+@app.after_request
+def after_request(response):
+    origin = request.headers.get('Origin')
+    if origin in ["https://my-stocks-s2at.onrender.com", "http://localhost:3000", "http://localhost:5177"]:
+        response.headers['Access-Control-Allow-Origin'] = origin
+    else:
+        response.headers['Access-Control-Allow-Origin'] = "https://my-stocks-s2at.onrender.com"
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept, Origin, X-Requested-With'
+    response.headers['Access-Control-Max-Age'] = '86400'
+    response.headers['Vary'] = 'Origin'
+    return response
+
+# Handle preflight requests
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = jsonify({'status': 'ok'})
+        origin = request.headers.get('Origin')
+        if origin in ["https://my-stocks-s2at.onrender.com", "http://localhost:3000", "http://localhost:5177"]:
+            response.headers['Access-Control-Allow-Origin'] = origin
+        else:
+            response.headers['Access-Control-Allow-Origin'] = "https://my-stocks-s2at.onrender.com"
+        
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept, Origin, X-Requested-With'
+        response.headers['Access-Control-Max-Age'] = '86400'
+        logger.info(f"Handled preflight request from origin: {origin}")
+        return response
 
 # Get port from environment variable (Render sets this automatically)
 PORT = int(os.environ.get('PORT', 5000))
